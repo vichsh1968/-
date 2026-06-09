@@ -94,7 +94,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.7</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.8</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -157,7 +157,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.7 · build 2026-06-09b</span>
+    <span style="opacity:.7">v1.8 · build 2026-06-09c</span>
   </footer>
 </div>
 
@@ -172,6 +172,12 @@ const PROXIES = [
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 let timerId = null;
 let lastTriggers = new Set();
+let userNames = {};      // 使用者上傳的中文名（代號→名稱）
+let twNames = {};        // 官方來源抓到的中文名
+let twPromise = null;
+const today = () => new Date().toISOString().slice(0,10);
+const bareCode = tk => tk.replace(/\.(TW|TWO)$/i, "").toUpperCase();
+const nameFor = (tk, yahooName) => userNames[bareCode(tk)] || twNames[bareCode(tk)] || yahooName || "";
 
 const FIELDS = ["tickers","n","m","interval"];
 const CHECKS = ["c1","c2","c3","c4","c5","auto","notify"];
@@ -252,6 +258,44 @@ function ema(vals, period){
   return out;
 }
 
+// ---- 中文名稱：抓官方開放資料，每天快取一次 ----
+const NAME_SOURCES = [
+  { url:"https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",                 // 上市
+    pick:j=>Array.isArray(j)?j.map(r=>[r.Code, r.Name]):[] },
+  { url:"https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",        // 上櫃
+    pick:j=>Array.isArray(j)?j.map(r=>[r.SecuritiesCompanyCode||r.Code, r.CompanyName||r.Name]):[] },
+  { url:"https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo",            // 上市+上櫃備援
+    pick:j=>Array.isArray(j?.data)?j.data.map(r=>[r.stock_id, r.stock_name]):[] },
+];
+async function fetchJsonAny(url){
+  for(const wrap of [u=>u, PROXIES[0]]){     // 先直連（官方多半允許 CORS），不行再走一個中繼
+    try{
+      const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),6000);
+      const res=await fetch(wrap(url), {cache:"no-store", signal:ctrl.signal});
+      clearTimeout(to);
+      if(res.ok) return await res.json();
+    }catch(e){}
+  }
+  return null;
+}
+async function _loadTwNames(){
+  try{ const c=JSON.parse(localStorage.getItem("twnames")||"null");
+       if(c && c.date===today() && c.map){ twNames=c.map; return; } }catch(e){}
+  const map = {};
+  await Promise.all(NAME_SOURCES.map(async s=>{
+    const j = await fetchJsonAny(s.url);
+    if(!j) return;
+    for(const [c,n] of s.pick(j)){
+      const code = c && String(c).trim().toUpperCase();
+      const nm = n && String(n).trim();
+      if(code && nm && !map[code]) map[code]=nm;
+    }
+  }));
+  twNames = map;
+  try{ localStorage.setItem("twnames", JSON.stringify({date:today(), map})); }catch(e){}  // 連空的也記，避免每次都慢
+}
+function loadTwNames(){ if(!twPromise) twPromise=_loadTwNames(); return twPromise; }
+
 function emaInfo(closes){
   if(closes.length < 23) return null;
   const e7=ema(closes,7), e11=ema(closes,11), e21=ema(closes,21);
@@ -323,6 +367,7 @@ async function run(){
   const N=+$("n").value, M=+$("m").value;
   const out=$("out");
   if(!tickers.length){ out.innerHTML='<div class="banner">請先輸入或上傳至少一檔股票代號。</div>'; btn.disabled=false; btn.textContent=orig; return; }
+  try{ await loadTwNames(); }catch(e){}   // 中文名稱對照（每天只抓一次）
 
   const alerts=[], cards=[]; let failures=0; let done=0;
   const results = await mapPool(tickers, 6, async (tk)=>{
@@ -337,7 +382,7 @@ async function run(){
       if(data.rows.length < Math.max(N,M)+1) return {tk:sym, error:"資料天數不足"};
       const ei = emaInfo(data.rows.map(r=>r.close));
       const {list, bigDay} = buildConds(data.cur, data.rows, N, M, ei ? ei.ema7 : null);
-      return {tk:sym, name:data.name, cur:data.cur, list, ei, bigDay};
+      return {tk:sym, name:nameFor(sym, data.name), cur:data.cur, list, ei, bigDay};
     }catch(e){
       return {tk, error: e.notFound ? "查無此代號（檢查 .TW / .TWO 或拼字）" : "來源忙線，稍後再試", fetchFail:!e.notFound};
     }
@@ -430,10 +475,19 @@ function normTicker(cell){
   if(/^\d{4,6}$/.test(s)) s += ".TW";   // 純數字當台股上市；上櫃請自己寫 .TWO
   return s;
 }
-function loadTickers(cells){
-  const out = cells.map(normTicker).filter(Boolean);
-  if(out.length){ $("tickers").value=out.join("\n"); lastTriggers=new Set(); store.save(); run(); }
-  else alert("檔案裡沒有讀到代號，請確認第一欄是股票代號。");
+function loadRows(rows){          // rows: [[代號, 名稱?], ...]
+  const codes=[];
+  for(const r of rows){
+    const t = normTicker(Array.isArray(r)?r[0]:r); if(!t) continue;
+    codes.push(t);
+    const nm = Array.isArray(r) && r[1]!=null ? String(r[1]).trim() : "";
+    if(nm) userNames[bareCode(t)] = nm;
+  }
+  if(codes.length){
+    $("tickers").value=codes.join("\n");
+    try{ localStorage.setItem("usernames", JSON.stringify(userNames)); }catch(e){}
+    lastTriggers=new Set(); store.save(); run();
+  } else alert("檔案裡沒有讀到代號，請確認第一欄是股票代號。");
 }
 $("file").addEventListener("change", e=>{
   const f=e.target.files[0]; if(!f) return;
@@ -447,9 +501,9 @@ $("file").addEventListener("change", e=>{
         const wb = XLSX.read(new Uint8Array(fr.result), {type:"array"});
         const ws = wb.Sheets[wb.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(ws, {header:1, raw:false});
-        loadTickers(aoa.map(r=>r[0]));
+        loadRows(aoa.map(r=>[r[0], r[1]]));
       }else{
-        loadTickers(fr.result.split(/\r?\n/).map(ln=>(ln.split(",")[0]||"")));
+        loadRows(fr.result.split(/\r?\n/).map(ln=>{ const p=ln.split(","); return [p[0], p[1]]; }));
       }
     }catch(err){ alert("讀取失敗："+(err.message||err)); }
     e.target.value="";
@@ -457,6 +511,8 @@ $("file").addEventListener("change", e=>{
   if(isExcel) fr.readAsArrayBuffer(f); else fr.readAsText(f);
 });
 
+try{ const un=JSON.parse(localStorage.getItem("usernames")||"null"); if(un) userNames=un; }catch(e){}
+loadTwNames();        // 開頁就在背景抓中文名稱，等使用者按檢查時通常已備妥
 store.load();
 if($("auto").checked){ applyAuto(); run(); }
 </script>
