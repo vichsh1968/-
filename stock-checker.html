@@ -61,6 +61,7 @@
   .alert.up{border-left-color:var(--up)} .alert.down{border-left-color:var(--down)}
   .alert b{font-family:var(--mono);font-size:15px}
   .alert .px{font-family:var(--mono);color:var(--muted);margin-left:auto;white-space:nowrap}
+  .alert .volm{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;transition:border-color .2s}
   .card.fire{border-color:var(--gold)}
@@ -101,7 +102,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.10</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.11</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -164,7 +165,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.10 · build 2026-06-09e</span>
+    <span style="opacity:.7">v1.11 · build 2026-06-09f</span>
   </footer>
 </div>
 
@@ -333,6 +334,8 @@ function emaInfo(closes){
 
 const fmt = n => (n==null||isNaN(n)) ? "—" : Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc = s => String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const volPct = v => (v==null||isNaN(v)) ? "—" : Math.round(v)+"%";
+const volText = vi => vi ? `<span class="volm">量 5日均 ${volPct(vi.vs5)}・昨日 ${volPct(vi.vsY)}</span>` : "";
 const pct = g => (g>=0?"+":"") + g.toFixed(2) + "%";
 const dstr = d => d.toISOString().slice(0,10);
 
@@ -389,7 +392,11 @@ async function run(){
       if(data.rows.length < Math.max(N,M)+1) return {tk:sym, error:"資料天數不足"};
       const ei = emaInfo(data.rows.map(r=>r.close));
       const {list, bigDay} = buildConds(data.cur, data.rows, N, M, ei ? ei.ema7 : null);
-      return {tk:sym, name:nameFor(sym, data.name), cur:data.cur, list, ei, bigDay, recent:data.rows.slice(-8)};
+      const rws = data.rows, tv = rws[rws.length-1].volume;
+      const p5 = rws.slice(-6,-1), a5 = p5.length ? p5.reduce((s,r)=>s+r.volume,0)/p5.length : 0;
+      const yv = rws.length>=2 ? rws[rws.length-2].volume : 0;
+      const volInfo = { tv, vs5: a5>0 ? tv/a5*100 : null, vsY: yv>0 ? tv/yv*100 : null };
+      return {tk:sym, name:nameFor(sym, data.name), cur:data.cur, list, ei, bigDay, recent:data.rows.slice(-8), volInfo};
     }catch(e){
       return {tk, error: e.notFound ? "查無此代號（檢查 .TW / .TWO 或拼字）" : "來源忙線，稍後再試", fetchFail:!e.notFound};
     }
@@ -399,9 +406,9 @@ async function run(){
   for(const r of results){
     if(r.error){ if(r.fetchFail) failures++; cards.push(cardErr(r.tk, r.error)); continue; }
     r.list.filter(c=>c.on && c.met).forEach(c=>{
-      alerts.push({tk:r.tk, name:r.name, cur:r.cur, dir:c.dir, key:r.tk+"::"+c.id, txt:`${c.label} ${fmt(c.level)}（${gapText(c)}）`});
+      alerts.push({tk:r.tk, name:r.name, cur:r.cur, dir:c.dir, key:r.tk+"::"+c.id, txt:`${c.label} ${fmt(c.level)}（${gapText(c)}）`, vol:r.volInfo});
     });
-    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, r.list.some(c=>c.on && c.met), r.recent));
+    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, r.list.some(c=>c.on && c.met), r.recent, r.volInfo));
   }
 
   const current = new Set(alerts.map(a=>a.key));
@@ -413,7 +420,7 @@ async function run(){
   let html="";
   if(alerts.length){
     html+='<div class="alerts"><h2>符合條件</h2>'+
-      alerts.map(a=>`<div class="alert ${a.dir}"><b>${a.tk}</b>${a.name?`<span class="nm">${esc(a.name)}</span>`:""}<span>${a.txt}</span><span class="px">現價 ${fmt(a.cur)}</span></div>`).join("")+'</div>';
+      alerts.map(a=>`<div class="alert ${a.dir}"><b>${a.tk}</b>${a.name?`<span class="nm">${esc(a.name)}</span>`:""}<span>${a.txt}</span>${volText(a.vol)}<span class="px">現價 ${fmt(a.cur)}</span></div>`).join("")+'</div>';
   }else{
     html+='<div class="banner">目前沒有股票符合已啟用的條件。</div>';
   }
@@ -469,7 +476,7 @@ function detailTable(recent, bigDay){
     <table class="dtab"><thead><tr><th>日期</th><th>高</th><th>低</th><th>收</th><th>量</th></tr></thead><tbody>${body}</tbody></table>
     <div class="lvl" style="margin-top:6px">★ = 21日內最大量那天</div></details>`;
 }
-function cardOk(tk, name, cur, list, ei, bigDay, fire, recent){
+function cardOk(tk, name, cur, list, ei, bigDay, fire, recent, vi){
   const emaHtml = ei
     ? `<div class="ema"><span class="chip ${ei.alignDir}">${ei.align}</span><span class="chip ${ei.crossDir}">${ei.crossTxt}</span><span class="chip ${ei.slopeDir}">${ei.slopeTxt}</span></div>`
     : `<div class="ema"><span class="chip">EMA 資料不足</span></div>`;
@@ -479,11 +486,15 @@ function cardOk(tk, name, cur, list, ei, bigDay, fire, recent){
     bandRow(`${$("m").value}日最大量高/低`, by.c3, by.c4, cur),
     emaRow(by.c5, cur),
   ].filter(Boolean).join("") || '<div class="cond"><span>未啟用任何條件</span></div>';
+  const volLine = vi
+    ? `<div class="lvl" style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--faint)">今日量 為5日均量 ${volPct(vi.vs5)}、昨日量 ${volPct(vi.vsY)}</div>`
+    : "";
   return `<div class="card ${fire?'fire':''}">
     <div class="top"><span class="tk">${tk}${name?` <span class="nm">${esc(name)}</span>`:""}</span><span class="now">${fmt(cur)}</span></div>
     ${emaHtml}
     <div class="conds">${rows}</div>
-    <div class="lvl" style="margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--faint)">最大量日 ${dstr(bigDay.date)}（量 ${Number(bigDay.volume).toLocaleString()}）</div>
+    ${volLine}
+    <div class="lvl" style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--faint)">最大量日 ${dstr(bigDay.date)}（量 ${Number(bigDay.volume).toLocaleString()}）</div>
     ${detailTable(recent, bigDay)}
   </div>`;
 }
