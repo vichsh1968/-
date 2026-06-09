@@ -73,7 +73,7 @@
   .chip.up{color:var(--up);border-color:rgba(255,79,94,.4)}
   .chip.down{color:var(--down);border-color:rgba(31,209,123,.4)}
   .conds{display:grid;gap:7px}
-  .cond{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:9px;font-size:13px;
+  .cond{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;
         padding:8px 10px;border-radius:8px;background:var(--panel-2);color:var(--muted)}
   .cond .lvl{font-family:var(--mono);font-size:11px;color:var(--faint)}
   .cond .gap{font-family:var(--mono);font-size:12px;text-align:right;white-space:nowrap}
@@ -94,7 +94,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.8</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.9</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -157,7 +157,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.8 · build 2026-06-09c</span>
+    <span style="opacity:.7">v1.9 · build 2026-06-09d</span>
   </footer>
 </div>
 
@@ -227,7 +227,7 @@ function parseChart(j){
   const q = r.indicators.quote[0];
   const rows = r.timestamp.map((t,i)=>({
     date:new Date(t*1000), high:q.high[i], low:q.low[i], close:q.close[i], volume:q.volume[i]
-  })).filter(x=>x.high!=null && x.low!=null && x.close!=null && x.volume!=null);
+  })).filter(x=>x.high!=null && x.low!=null && x.close!=null && x.volume!=null && x.high>0 && x.low>0 && x.high>=x.low);
   if(!rows.length) return null;
   const cur = r.meta?.regularMarketPrice ?? rows[rows.length-1]?.close;
   const name = r.meta?.shortName || r.meta?.longName || "";
@@ -429,22 +429,44 @@ function updateStamp(){
   $("stamp").textContent = $("auto").checked ? `${t} · 自動每 ${$("interval").value} 分` : t;
 }
 
+function bandRow(title, lowC, highC, cur){
+  const lowOn = lowC && lowC.on, highOn = highC && highC.on;
+  if(!lowOn && !highOn) return "";
+  let cls="", status;
+  if(highOn && cur > highC.level){
+    status = `▲ 突破 ${fmt(highC.level)}（+${((cur-highC.level)/highC.level*100).toFixed(2)}%）`; cls="hit up";
+  }else if(lowOn && cur < lowC.level){
+    status = `▼ 跌破 ${fmt(lowC.level)}（-${((lowC.level-cur)/lowC.level*100).toFixed(2)}%）`; cls="hit down";
+  }else{
+    const parts=[];
+    if(highOn) parts.push(`距高 ${((highC.level-cur)/highC.level*100).toFixed(2)}%`);
+    if(lowOn)  parts.push(`距低 ${((cur-lowC.level)/lowC.level*100).toFixed(2)}%`);
+    status = `區間內　${parts.join("　")}`;
+  }
+  const range = `${lowOn?fmt(lowC.level):"—"} ~ ${highOn?fmt(highC.level):"—"}`;
+  return `<div class="cond ${cls}"><span>${title}<br><span class="lvl">${range}</span></span><span class="gap">${status}</span></div>`;
+}
+function emaRow(c, cur){
+  if(!c || !c.on) return "";
+  if(cur < c.level)
+    return `<div class="cond hit down"><span>EMA7<br><span class="lvl">${fmt(c.level)}</span></span><span class="gap">▼ 跌破（-${((c.level-cur)/c.level*100).toFixed(2)}%）</span></div>`;
+  return `<div class="cond"><span>EMA7<br><span class="lvl">${fmt(c.level)}</span></span><span class="gap">在其上 +${((cur-c.level)/c.level*100).toFixed(2)}%</span></div>`;
+}
 function cardOk(tk, name, cur, list, ei, bigDay, fire){
   const emaHtml = ei
     ? `<div class="ema"><span class="chip ${ei.alignDir}">${ei.align}</span><span class="chip ${ei.crossDir}">${ei.crossTxt}</span><span class="chip ${ei.slopeDir}">${ei.slopeTxt}</span></div>`
     : `<div class="ema"><span class="chip">EMA 資料不足</span></div>`;
-  const rows = list.filter(c=>c.on).map(c=>{
-    const tag = c.met ? (c.dir==="up"?"▲":"▼") : "·";
-    return `<div class="cond ${c.met?'hit '+c.dir:''}">
-      <span class="tag">${tag}</span>
-      <span>${c.label}<br><span class="lvl">門檻 ${fmt(c.level)}</span></span>
-      <span class="gap">${gapText(c)}</span></div>`;
-  }).join("") || '<div class="cond"><span class="tag">·</span><span>未啟用任何條件</span><span></span></div>';
+  const by = {}; list.forEach(c=>by[c.id]=c);
+  const rows = [
+    bandRow(`前${$("n").value}日高/低`, by.c1, by.c2, cur),
+    bandRow(`${$("m").value}日最大量高/低`, by.c3, by.c4, cur),
+    emaRow(by.c5, cur),
+  ].filter(Boolean).join("") || '<div class="cond"><span>未啟用任何條件</span></div>';
   return `<div class="card ${fire?'fire':''}">
     <div class="top"><span class="tk">${tk}${name?` <span class="nm">${esc(name)}</span>`:""}</span><span class="now">${fmt(cur)}</span></div>
     ${emaHtml}
     <div class="conds">${rows}</div>
-    <div class="lvl" style="margin-top:9px">最大量日 ${dstr(bigDay.date)}（量 ${Number(bigDay.volume).toLocaleString()}）</div>
+    <div class="lvl" style="margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--faint)">最大量日 ${dstr(bigDay.date)}（量 ${Number(bigDay.volume).toLocaleString()}）</div>
   </div>`;
 }
 function cardErr(tk,msg){
