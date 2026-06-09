@@ -67,6 +67,13 @@
   .card .top{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
   .tk{font-family:var(--mono);font-size:16px;font-weight:600}
   .nm{font-size:12px;color:var(--muted);font-weight:500}
+  .detail{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+  .detail summary{padding:0;font-size:12px;font-weight:500;color:var(--gold)}
+  .dtab{width:100%;border-collapse:collapse;margin-top:8px;font-family:var(--mono);font-size:11px}
+  .dtab th{color:var(--muted);font-weight:500;text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+  .dtab td{text-align:right;padding:3px 4px;color:var(--ink)}
+  .dtab th:first-child,.dtab td:first-child{text-align:left}
+  .dtab tr.big td{color:var(--gold)}
   .now{font-family:var(--mono);font-size:18px;font-weight:600}
   .ema{display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;font-family:var(--mono);margin-bottom:12px}
   .chip{padding:3px 8px;border-radius:999px;background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
@@ -94,7 +101,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.9</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.10</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -157,7 +164,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.9 · build 2026-06-09d</span>
+    <span style="opacity:.7">v1.10 · build 2026-06-09e</span>
   </footer>
 </div>
 
@@ -382,7 +389,7 @@ async function run(){
       if(data.rows.length < Math.max(N,M)+1) return {tk:sym, error:"資料天數不足"};
       const ei = emaInfo(data.rows.map(r=>r.close));
       const {list, bigDay} = buildConds(data.cur, data.rows, N, M, ei ? ei.ema7 : null);
-      return {tk:sym, name:nameFor(sym, data.name), cur:data.cur, list, ei, bigDay};
+      return {tk:sym, name:nameFor(sym, data.name), cur:data.cur, list, ei, bigDay, recent:data.rows.slice(-8)};
     }catch(e){
       return {tk, error: e.notFound ? "查無此代號（檢查 .TW / .TWO 或拼字）" : "來源忙線，稍後再試", fetchFail:!e.notFound};
     }
@@ -394,7 +401,7 @@ async function run(){
     r.list.filter(c=>c.on && c.met).forEach(c=>{
       alerts.push({tk:r.tk, name:r.name, cur:r.cur, dir:c.dir, key:r.tk+"::"+c.id, txt:`${c.label} ${fmt(c.level)}（${gapText(c)}）`});
     });
-    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, r.list.some(c=>c.on && c.met)));
+    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, r.list.some(c=>c.on && c.met), r.recent));
   }
 
   const current = new Set(alerts.map(a=>a.key));
@@ -452,7 +459,17 @@ function emaRow(c, cur){
     return `<div class="cond hit down"><span>EMA7<br><span class="lvl">${fmt(c.level)}</span></span><span class="gap">▼ 跌破（-${((c.level-cur)/c.level*100).toFixed(2)}%）</span></div>`;
   return `<div class="cond"><span>EMA7<br><span class="lvl">${fmt(c.level)}</span></span><span class="gap">在其上 +${((cur-c.level)/c.level*100).toFixed(2)}%</span></div>`;
 }
-function cardOk(tk, name, cur, list, ei, bigDay, fire){
+function detailTable(recent, bigDay){
+  if(!recent || !recent.length) return "";
+  const body = recent.slice().reverse().map(r=>{
+    const big = bigDay && +r.date===+bigDay.date;
+    return `<tr${big?' class="big"':''}><td>${dstr(r.date)}${big?' ★':''}</td><td>${fmt(r.high)}</td><td>${fmt(r.low)}</td><td>${fmt(r.close)}</td><td>${Number(r.volume).toLocaleString()}</td></tr>`;
+  }).join("");
+  return `<details class="detail"><summary>查看近幾日資料（對照你的券商）</summary>
+    <table class="dtab"><thead><tr><th>日期</th><th>高</th><th>低</th><th>收</th><th>量</th></tr></thead><tbody>${body}</tbody></table>
+    <div class="lvl" style="margin-top:6px">★ = 21日內最大量那天</div></details>`;
+}
+function cardOk(tk, name, cur, list, ei, bigDay, fire, recent){
   const emaHtml = ei
     ? `<div class="ema"><span class="chip ${ei.alignDir}">${ei.align}</span><span class="chip ${ei.crossDir}">${ei.crossTxt}</span><span class="chip ${ei.slopeDir}">${ei.slopeTxt}</span></div>`
     : `<div class="ema"><span class="chip">EMA 資料不足</span></div>`;
@@ -467,6 +484,7 @@ function cardOk(tk, name, cur, list, ei, bigDay, fire){
     ${emaHtml}
     <div class="conds">${rows}</div>
     <div class="lvl" style="margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--faint)">最大量日 ${dstr(bigDay.date)}（量 ${Number(bigDay.volume).toLocaleString()}）</div>
+    ${detailTable(recent, bigDay)}
   </div>`;
 }
 function cardErr(tk,msg){
