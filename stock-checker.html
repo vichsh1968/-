@@ -118,7 +118,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.13</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.14</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -135,6 +135,7 @@ AAPL</textarea>
         </label>
         <span class="hint">支援 Excel(.xlsx) / .csv / .txt，取第一欄當代號。純數字視為台股上市自動補 .TW；上櫃請自己寫 .TWO，美股直接打代號。</span>
       </div>
+      <label class="tog" style="margin-top:10px"><input type="checkbox" id="autolist" checked> 開啟時自動載入 GitHub 上的 watchlist 清單檔（電腦/手機共用同一份）</label>
 
       <label class="fld">啟用的條件（勾選要檢查的）</label>
       <div class="conds-set">
@@ -181,7 +182,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.13 · build 2026-06-09h</span>
+    <span style="opacity:.7">v1.14 · build 2026-06-10a</span>
   </footer>
 </div>
 
@@ -204,7 +205,7 @@ const bareCode = tk => tk.replace(/\.(TW|TWO)$/i, "").toUpperCase();
 const nameFor = (tk, yahooName) => userNames[bareCode(tk)] || twNames[bareCode(tk)] || yahooName || "";
 
 const FIELDS = ["tickers","n","m","interval"];
-const CHECKS = ["c1","c2","c3","c4","c5","auto","notify"];
+const CHECKS = ["c1","c2","c3","c4","c5","auto","notify","autolist"];
 const store = {
   save(){ try{
     const o={}; FIELDS.forEach(f=>o[f]=$(f).value); CHECKS.forEach(c=>o[c]=$(c).checked);
@@ -639,10 +640,37 @@ $("file").addEventListener("change", e=>{
   if(isExcel) fr.readAsArrayBuffer(f); else fr.readAsText(f);
 });
 
-try{ const un=JSON.parse(localStorage.getItem("usernames")||"null"); if(un) userNames=un; }catch(e){}
-loadTwNames();        // 開頁就在背景抓中文名稱，等使用者按檢查時通常已備妥
+// 開啟時自動讀 GitHub 上同資料夾的 watchlist 檔（同網域、無 CORS 問題），電腦手機共用一份
+async function autoLoadWatchlist(){
+  if(!$("autolist") || !$("autolist").checked) return;
+  for(const f of ["watchlist.csv","watchlist.txt"]){
+    try{
+      const res = await fetch(f + "?t=" + Date.now(), {cache:"no-store"});
+      if(!res.ok) continue;
+      const text = await res.text();
+      const codes=[];
+      for(const ln of text.split(/\r?\n/)){
+        const p = ln.split(","); const t = normTicker(p[0]); if(!t) continue;
+        codes.push(t);
+        const nm = p[1]!=null ? String(p[1]).trim() : ""; if(nm) userNames[bareCode(t)] = nm;
+      }
+      if(codes.length){
+        $("tickers").value = codes.join("\n");
+        try{ localStorage.setItem("usernames", JSON.stringify(userNames)); }catch(e){}
+        return true;
+      }
+    }catch(e){}
+  }
+  return false;
+}
+
 store.load();
-if($("auto").checked){ applyAuto(); run(); }
+try{ const un=JSON.parse(localStorage.getItem("usernames")||"null"); if(un) userNames=un; }catch(e){}
+loadTwNames();
+(async ()=>{
+  await autoLoadWatchlist();          // 先套用共用清單，再依設定檢查
+  if($("auto").checked){ applyAuto(); run(); }
+})();
 </script>
 </body>
 </html>
