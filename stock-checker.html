@@ -84,6 +84,16 @@
   .pill.red{background:var(--up-bg);color:var(--up)}
   .pill.green{background:var(--down-bg);color:var(--down)}
   .pill.flat{background:var(--panel);color:var(--muted)}
+  .strong{display:flex;align-items:center;gap:8px;margin:10px 0 0;padding:8px 12px;border-radius:9px;
+    font-weight:800;font-size:14px;color:#101216;background:linear-gradient(90deg,var(--gold),#f3c969)}
+  .strong .sub{font-weight:600;font-size:11px;color:#3a3320;opacity:.9}
+  .strongbox{margin:6px 0 14px;border:1px solid var(--gold);border-radius:12px;padding:12px 14px;
+    background:linear-gradient(180deg,rgba(232,181,74,.14),rgba(232,181,74,.04))}
+  .strongbox h2{font-size:14px;color:var(--gold);font-weight:800;margin:0 0 8px;letter-spacing:.4px}
+  .srow{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid rgba(232,181,74,.18)}
+  .srow:first-of-type{border-top:none}
+  .srow b{font-family:var(--mono);font-size:15px}
+  .srow .px{margin-left:auto;font-family:var(--mono);color:var(--muted);font-size:13px}
   .detail{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
   .detail summary{padding:0;font-size:12px;font-weight:500;color:var(--gold)}
   .dtab{width:100%;border-collapse:collapse;margin-top:8px;font-family:var(--mono);font-size:11px}
@@ -118,7 +128,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.14</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.15</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -182,7 +192,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.14 · build 2026-06-10a</span>
+    <span style="opacity:.7">v1.15 · build 2026-06-10b</span>
   </footer>
 </div>
 
@@ -352,18 +362,26 @@ function emaInfo(closes){
 const fmt = n => (n==null||isNaN(n)) ? "—" : Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 
 // 寶塔線：以收盤價判斷、狀態延續。收盤高於前N根高點翻紅；低於前N根低點翻綠。預設 N=3。
-function towerColor(bars, N=3){
-  if(!bars || bars.length < N+1) return null;
+function towerSeries(bars, N=3){
+  const out = new Array(bars.length).fill(null);
+  if(!bars || bars.length < N+1) return out;
   let state=null;
-  for(let i=N;i<bars.length;i++){
-    const c = bars[i].close;
-    let hiN=-Infinity, loN=Infinity;
-    for(let j=i-N;j<i;j++){ if(bars[j].high>hiN)hiN=bars[j].high; if(bars[j].low<loN)loN=bars[j].low; }
-    if(state!=="red"   && c>hiN) state="red";
-    else if(state!=="green" && c<loN) state="green";
+  for(let i=0;i<bars.length;i++){
+    if(i>=N){
+      const c = bars[i].close; let hiN=-Infinity, loN=Infinity;
+      for(let j=i-N;j<i;j++){ if(bars[j].high>hiN)hiN=bars[j].high; if(bars[j].low<loN)loN=bars[j].low; }
+      if(state!=="red"   && c>hiN) state="red";
+      else if(state!=="green" && c<loN) state="green";
+    }
+    out[i]=state;
   }
-  if(!state) state = bars[bars.length-1].close >= bars[0].close ? "red" : "green";
-  return state;
+  return out;
+}
+function towerColor(bars, N=3){
+  const s = towerSeries(bars, N);
+  let st = s[s.length-1];
+  if(!st && bars && bars.length) st = bars[bars.length-1].close >= bars[0].close ? "red" : "green";
+  return st;
 }
 // 把日線聚合成週線（週一為一週之始）
 function resampleWeekly(rows){
@@ -377,13 +395,31 @@ function resampleWeekly(rows){
   }
   return Array.from(map.values());
 }
-// 計算四個訊號
+// 計算訊號：今日/本週 K、寶塔線顏色，以及「日線轉強」複合條件
 function computeSignals(rows, cur){
   const last = rows[rows.length-1];
   const dayK = last.open==null ? "flat" : (cur>last.open ? "red" : cur<last.open ? "green" : "flat");
   const dbars = rows.map(r=>({high:r.high,low:r.low,close:r.close}));
   dbars[dbars.length-1].close = cur;                       // 今日用即時價
-  const dayTower = towerColor(dbars, 3);
+  const dSeries = towerSeries(dbars, 3);
+  const L = dSeries.length-1;
+  const dayTower = dSeries[L] || (dbars[L].close>=dbars[0].close?"red":"green");
+  const towerFlip = dSeries[L]==="red" && dSeries[L-1]==="green";   // 昨綠今紅
+
+  // OBV：收高加量、收低減量；今日收盤用即時價
+  const closes = rows.map(r=>r.close); closes[closes.length-1] = cur;
+  const vols = rows.map(r=>r.volume);
+  let obv=0, obvPrev=0;
+  for(let i=1;i<closes.length;i++){
+    obvPrev = obv;
+    if(closes[i]>closes[i-1]) obv += vols[i];
+    else if(closes[i]<closes[i-1]) obv -= vols[i];
+  }
+  const obvUp = obv > obvPrev;                              // 今日 OBV > 昨日
+  const tv = vols[vols.length-1], yv = vols[vols.length-2] || 0;
+  const volSurge = yv>0 && tv > yv*1.2;                     // 今量 > 昨量×1.2
+  const turnStrong = towerFlip && obvUp && volSurge;
+
   const wk = resampleWeekly(rows);
   let weekK="flat", weekTower=null;
   if(wk.length){
@@ -392,7 +428,7 @@ function computeSignals(rows, cur){
     weekK = cw.open==null ? "flat" : (cur>cw.open ? "red" : cur<cw.open ? "green" : "flat");
     weekTower = towerColor(wk, 3);
   }
-  return {dayK, dayTower, weekK, weekTower};
+  return {dayK, dayTower, weekK, weekTower, towerFlip, obvUp, volSurge, turnStrong};
 }
 
 const esc = s => String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -441,7 +477,7 @@ async function run(){
   if(!tickers.length){ out.innerHTML='<div class="banner">請先輸入或上傳至少一檔股票代號。</div>'; btn.disabled=false; btn.textContent=orig; return; }
   try{ await loadTwNames(); }catch(e){}   // 中文名稱對照（每天只抓一次）
 
-  const alerts=[], cards=[]; let failures=0; let done=0;
+  const alerts=[], cards=[], strong=[]; let failures=0; let done=0;
   const results = await mapPool(tickers, 6, async (tk)=>{
     try{
       let data;
@@ -471,16 +507,24 @@ async function run(){
     r.list.filter(c=>c.on && c.met).forEach(c=>{
       alerts.push({tk:r.tk, name:r.name, cur:r.cur, dir:c.dir, key:r.tk+"::"+c.id, txt:`${c.label} ${fmt(c.level)}（${gapText(c)}）`, vol:r.volInfo});
     });
-    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, r.list.some(c=>c.on && c.met), r.recent, r.volInfo, r.signals));
+    if(r.signals && r.signals.turnStrong) strong.push({tk:r.tk, name:r.name, cur:r.cur});
+    const fire = r.list.some(c=>c.on && c.met) || (r.signals && r.signals.turnStrong);
+    cards.push(cardOk(r.tk, r.name, r.cur, r.list, r.ei, r.bigDay, fire, r.recent, r.volInfo, r.signals));
   }
 
   const current = new Set(alerts.map(a=>a.key));
+  strong.forEach(s=> current.add(s.tk+"::STRONG"));
   if($("notify").checked){
     alerts.filter(a=>!lastTriggers.has(a.key)).forEach(a=> notify(`${a.tk} ${a.txt}`, `現價 ${fmt(a.cur)}`));
+    strong.filter(s=>!lastTriggers.has(s.tk+"::STRONG")).forEach(s=> notify(`${s.tk} 日線轉強`, `現價 ${fmt(s.cur)}`));
   }
   lastTriggers = current;
 
   let html="";
+  if(strong.length){
+    html+='<div class="strongbox"><h2>🔥 日線轉強</h2>'+
+      strong.map(s=>`<div class="srow"><b>${s.tk}</b>${s.name?`<span class="nm">${esc(s.name)}</span>`:""}<span class="px">現價 ${fmt(s.cur)}</span></div>`).join("")+'</div>';
+  }
   if(alerts.length){
     html+='<div class="alerts"><h2>符合條件</h2>'+
       alerts.map(a=>`<div class="alert ${a.dir}"><b>${a.tk}</b>${a.name?`<span class="nm">${esc(a.name)}</span>`:""}<span>${a.txt}</span>${volText(a.vol)}<span class="px">現價 ${fmt(a.cur)}</span></div>`).join("")+'</div>';
@@ -546,7 +590,9 @@ function pill(state, redTxt, greenTxt){
 }
 function signalsGrid(s){
   if(!s) return "";
-  return `<div class="sig">
+  const strong = s.turnStrong
+    ? `<div class="strong">🔥 日線轉強 <span class="sub">寶塔翻紅・OBV↑・量&gt;昨1.2倍</span></div>` : "";
+  return `${strong}<div class="sig">
     <div class="sigcell"><span class="lab2">今日K</span>${pill(s.dayK,"紅K","黑K")}</div>
     <div class="sigcell"><span class="lab2">本週K</span>${pill(s.weekK,"紅K","黑K")}</div>
     <div class="sigcell"><span class="lab2">今日寶塔</span>${pill(s.dayTower,"紅","綠")}</div>
