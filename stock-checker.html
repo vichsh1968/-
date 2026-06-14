@@ -136,7 +136,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.17</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.18</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -154,6 +154,7 @@ AAPL</textarea>
         <span class="hint">支援 Excel(.xlsx) / .csv / .txt。第一欄代號、第二欄中文名（選填）、第三欄分類（選填，如 持股／篩選），可用分類分開檢視。純數字視為台股上市自動補 .TW；上櫃請自己寫 .TWO，美股直接打代號。</span>
       </div>
       <label class="tog" style="margin-top:10px"><input type="checkbox" id="autolist" checked> 開啟時自動載入 GitHub 上的 watchlist 清單檔（電腦/手機共用同一份）</label>
+      <button id="renames" class="check" style="width:auto;margin:10px 0 0;padding:8px 16px;font-size:13px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line)">重抓中文名稱</button>
 
       <label class="fld">啟用的條件（勾選要檢查的）</label>
       <div class="conds-set">
@@ -200,7 +201,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.17 · build 2026-06-10d</span>
+    <span style="opacity:.7">v1.18 · build 2026-06-10e</span>
   </footer>
 </div>
 
@@ -314,12 +315,12 @@ const NAME_SOURCES = [
     pick:j=>Array.isArray(j?.data)?j.data.map(r=>[r.stock_id, r.stock_name]):[] },
 ];
 async function fetchJsonAny(url){
-  for(const wrap of [u=>u, PROXIES[0]]){     // 先直連（官方多半允許 CORS），不行再走一個中繼
+  for(const wrap of [u=>u, PROXIES[0], PROXIES[1], PROXIES[2]]){   // 直連，再依序試各中繼站
     try{
-      const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),6000);
+      const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),10000);
       const res=await fetch(wrap(url), {cache:"no-store", signal:ctrl.signal});
       clearTimeout(to);
-      if(res.ok) return await res.json();
+      if(res.ok){ const j=await res.json(); if(j) return j; }
     }catch(e){}
   }
   return null;
@@ -687,6 +688,16 @@ function applyAuto(){
 }
 
 $("run").addEventListener("click", run);
+const rn=$("renames"); if(rn) rn.addEventListener("click", async ()=>{
+  rn.disabled=true; const o=rn.textContent; rn.textContent="抓取中…";
+  try{ localStorage.removeItem("twnames"); }catch(e){}
+  twNames={}; twPromise=null;
+  await loadTwNames();
+  const n=Object.keys(twNames).length;
+  rn.textContent = n ? `已抓到 ${n} 檔，更新中…` : "這次沒抓到，稍後再試";
+  if(n && $("tickers").value.trim()) run();
+  setTimeout(()=>{ rn.textContent=o; rn.disabled=false; }, 2500);
+});
 $("auto").addEventListener("change", ()=>{ applyAuto(); if($("auto").checked) run(); });
 $("interval").addEventListener("change", ()=>{ if($("auto").checked) applyAuto(); else store.save(); });
 $("notify").addEventListener("change", async ()=>{
