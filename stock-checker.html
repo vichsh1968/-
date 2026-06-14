@@ -136,7 +136,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.20</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.21</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -201,7 +201,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.20 · build 2026-06-10g</span>
+    <span style="opacity:.7">v1.21 · build 2026-06-10h</span>
   </footer>
 </div>
 
@@ -500,7 +500,9 @@ function gapText(c){
   return c.met ? `已突破 ${pct(c.gap)}` : `距突破 ${pct(c.gap)}`;
 }
 
-async function run(){
+let autoRetryLeft = 0;   // 跑完若有沒抓到的，自動再補抓的剩餘次數
+async function run(isRetry){
+  if(isRetry!==true) autoRetryLeft = 2;   // 新的一次檢查：最多自動重試兩輪
   store.save();
   const btn=$("run"); btn.disabled=true; const orig=btn.textContent; btn.textContent="檢查中…";
   const tickers = $("tickers").value.split("\n").map(line=>{
@@ -585,19 +587,21 @@ async function run(){
     html+='<div class="banner">目前沒有股票符合已啟用的條件。</div>';
   }
   if(failures>0){
-    const msg = failures===tickers.length
+    const willRetry = autoRetryLeft>0;
+    const msg = (failures===tickers.length
       ? "全部都抓不到 —— 通常是中繼服務忙線。"
-      : `有 ${failures} 檔忙線沒抓到。`;
+      : `有 ${failures} 檔忙線沒抓到。`) + (willRetry ? " 自動重試中…" : "");
     html='<div class="banner bad">'+msg+' <button id="retryFailed" class="check" style="width:auto;margin:8px 0 0;padding:8px 16px;font-size:13px">重試沒抓到的</button></div>'+html;
   }
   html+='<div class="grid" style="margin-top:16px">'+cards.join("")+'</div>';
   out.innerHTML=html;
   out.querySelectorAll(".tab").forEach(b=> b.addEventListener("click", ()=>{ curGroup=b.dataset.g; applyGroupFilter(); }));
   applyGroupFilter();
-  const rb=$("retryFailed"); if(rb) rb.addEventListener("click", run);  // 成功的已快取，等於只重抓失敗的
+  const rb=$("retryFailed"); if(rb) rb.addEventListener("click", ()=>run());  // 成功的已快取，等於只重抓失敗的
   updateStamp();
   if(window.matchMedia("(max-width:520px)").matches) $("settings").open=false;
   btn.disabled=false; btn.textContent=orig;
+  if(failures>0 && autoRetryLeft>0){ autoRetryLeft--; setTimeout(()=>run(true), 2500); }   // 自動補抓沒抓到的
 }
 
 // 依目前選的分類，顯示/隱藏卡片與摘要列
@@ -698,11 +702,11 @@ function cardErr(tk,msg){
 
 function applyAuto(){
   if(timerId){ clearInterval(timerId); timerId=null; }
-  if($("auto").checked){ timerId = setInterval(run, (+$("interval").value)*60000); }
+  if($("auto").checked){ timerId = setInterval(()=>run(), (+$("interval").value)*60000); }
   updateStamp(); store.save();
 }
 
-$("run").addEventListener("click", run);
+$("run").addEventListener("click", ()=>run());
 const rn=$("renames"); if(rn) rn.addEventListener("click", async ()=>{
   rn.disabled=true; const o=rn.textContent; rn.textContent="抓取中…";
   try{ localStorage.removeItem("twnames"); }catch(e){}
