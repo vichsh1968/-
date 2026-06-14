@@ -136,7 +136,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.19</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.20</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -201,7 +201,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.19 · build 2026-06-10f</span>
+    <span style="opacity:.7">v1.20 · build 2026-06-10g</span>
   </footer>
 </div>
 
@@ -221,9 +221,17 @@ let userGroups = {};     // 使用者分類（代號→分類，如 持股 / 篩
 let curGroup = "全部";    // 目前篩選的分類
 let twNames = {};        // 官方來源抓到的中文名
 let twPromise = null;
+// 內建常用中文名：線上抓不到或被中繼站弄壞時的保底，永遠是乾淨的 UTF-8
+const BUILTIN_NAMES = {
+  "1605":"華新","2385":"群光","3711":"日月光投控","2006":"東和鋼鐵","3189":"景碩",
+  "4958":"臻鼎-KY","2360":"致茂","8091":"翔名","3105":"穩懋",
+  "2330":"台積電","2317":"鴻海","2454":"聯發科","6488":"環球晶"
+};
 const today = () => new Date().toISOString().slice(0,10);
 const bareCode = tk => tk.replace(/\.(TW|TWO)$/i, "").toUpperCase();
-const nameFor = (tk, yahooName) => userNames[bareCode(tk)] || twNames[bareCode(tk)] || yahooName || "";
+const cleanNm = s => (s && !String(s).includes("\uFFFD")) ? String(s).trim() : "";   // 含替代字元(亂碼)就丟掉
+const nameFor = (tk, yahooName) => { const c = bareCode(tk);
+  return cleanNm(userNames[c]) || cleanNm(twNames[c]) || cleanNm(BUILTIN_NAMES[c]) || cleanNm(yahooName) || ""; };
 const groupFor = tk => userGroups[bareCode(tk)] || "";
 
 const FIELDS = ["tickers","n","m","interval"];
