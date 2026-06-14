@@ -136,7 +136,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.18</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.19</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -201,7 +201,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.18 · build 2026-06-10e</span>
+    <span style="opacity:.7">v1.19 · build 2026-06-10f</span>
   </footer>
 </div>
 
@@ -315,19 +315,26 @@ const NAME_SOURCES = [
     pick:j=>Array.isArray(j?.data)?j.data.map(r=>[r.stock_id, r.stock_name]):[] },
 ];
 async function fetchJsonAny(url){
-  for(const wrap of [u=>u, PROXIES[0], PROXIES[1], PROXIES[2]]){   // 直連，再依序試各中繼站
+  for(const wrap of [u=>u, PROXIES[2], PROXIES[1], PROXIES[0]]){   // 直連，再依序試各中繼站
     try{
       const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),10000);
       const res=await fetch(wrap(url), {cache:"no-store", signal:ctrl.signal});
       clearTimeout(to);
-      if(res.ok){ const j=await res.json(); if(j) return j; }
+      if(res.ok){
+        const buf = await res.arrayBuffer();
+        const text = new TextDecoder("utf-8").decode(buf);   // 強制 UTF-8，避免中文亂碼
+        if(text.includes("\uFFFD")) continue;                // 這個來源把中文弄壞了 → 換下一個
+        const j = JSON.parse(text);
+        if(j) return j;
+      }
     }catch(e){}
   }
   return null;
 }
 async function _loadTwNames(){
   try{ const c=JSON.parse(localStorage.getItem("twnames")||"null");
-       if(c && c.date===today() && c.map && Object.keys(c.map).length){ twNames=c.map; return; } }catch(e){}
+       if(c && c.date===today() && c.map && Object.keys(c.map).length
+          && !JSON.stringify(c.map).includes("\uFFFD")){ twNames=c.map; return; } }catch(e){}
   const map = {};
   await Promise.all(NAME_SOURCES.map(async s=>{
     const j = await fetchJsonAny(s.url);
