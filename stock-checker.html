@@ -136,7 +136,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.16</span></h1>
+    <h1>股票條件檢查 <span class="dot">●</span> <span style="font-size:11px;color:var(--faint);font-family:var(--mono);font-weight:400">v1.17</span></h1>
     <div class="stamp" id="stamp">尚未檢查</div>
   </header>
 
@@ -200,7 +200,7 @@ AAPL</textarea>
     紅＝突破（漲）、綠＝跌破（跌），依台股慣例。EMA 取近一年日線計算。<br>
     自動檢查與通知只在本頁開著時運作；關掉分頁就會停止。<br>
     價格為 Yahoo 來源、約延遲 15 分鐘，非即時逐筆。<br>
-    <span style="opacity:.7">v1.16 · build 2026-06-10c</span>
+    <span style="opacity:.7">v1.17 · build 2026-06-10d</span>
   </footer>
 </div>
 
@@ -326,7 +326,7 @@ async function fetchJsonAny(url){
 }
 async function _loadTwNames(){
   try{ const c=JSON.parse(localStorage.getItem("twnames")||"null");
-       if(c && c.date===today() && c.map){ twNames=c.map; return; } }catch(e){}
+       if(c && c.date===today() && c.map && Object.keys(c.map).length){ twNames=c.map; return; } }catch(e){}
   const map = {};
   await Promise.all(NAME_SOURCES.map(async s=>{
     const j = await fetchJsonAny(s.url);
@@ -338,9 +338,14 @@ async function _loadTwNames(){
     }
   }));
   twNames = map;
-  try{ localStorage.setItem("twnames", JSON.stringify({date:today(), map})); }catch(e){}  // 連空的也記，避免每次都慢
+  if(Object.keys(map).length){     // 只有真的抓到才存快取，避免空表卡一整天
+    try{ localStorage.setItem("twnames", JSON.stringify({date:today(), map})); }catch(e){}
+  }
 }
-function loadTwNames(){ if(!twPromise) twPromise=_loadTwNames(); return twPromise; }
+function loadTwNames(){
+  if(!twPromise) twPromise = _loadTwNames().then(()=>{ if(!Object.keys(twNames).length) twPromise=null; });  // 沒抓到就允許下次重抓
+  return twPromise;
+}
 
 function emaInfo(closes){
   if(closes.length < 23) return null;
